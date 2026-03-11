@@ -53,7 +53,8 @@ function loadConfig(): AppConfig {
       jwtSecret: required("JWT_SECRET"),
       jwtExpiresIn: optional("JWT_EXPIRES_IN", "7d"),
       adminUsername: optional("ADMIN_USERNAME", "admin"),
-      adminPasswordHash: required("ADMIN_PASSWORD_HASH"),
+      adminPasswordHash: optional("ADMIN_PASSWORD_HASH", ""),
+      adminPassword: optional("ADMIN_PASSWORD", ""),
     },
 
     ai: {

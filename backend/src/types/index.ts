@@ -473,6 +473,7 @@ export interface AppConfig {
     jwtExpiresIn: string;
     adminUsername: string;
     adminPasswordHash: string;
+    adminPassword: string;
   };
 
   ai: {

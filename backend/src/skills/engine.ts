@@ -352,7 +352,7 @@ export class SkillEngine extends EventEmitter {
   private isSkillFile(filePath: string): boolean {
     const ext = path.extname(filePath);
     const base = path.basename(filePath);
-    return (ext === ".js" || ext === ".ts") && !base.startsWith("_");
+    return (ext === ".js" || ext === ".ts") && !base.startsWith("_") && !base.endsWith(".d.ts");
   }
 
   /**
