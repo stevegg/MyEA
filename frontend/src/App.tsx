@@ -24,6 +24,7 @@ import {
   Wifi,
   WifiOff,
   Bot,
+  CalendarClock,
 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -170,6 +171,7 @@ const NAV_ITEMS = [
   { path: "/skills", label: "Skills", icon: Puzzle },
   { path: "/integrations", label: "Integrations", icon: Plug2 },
   { path: "/logs", label: "Logs", icon: FileText },
+  { path: "/jobs", label: "Jobs", icon: CalendarClock },
   { path: "/settings", label: "Settings", icon: Settings },
 ] as const;
 
@@ -314,6 +316,7 @@ import LogsFullPage from "./pages/Logs";
 import SkillsFullPage from "./pages/Skills";
 import DashboardFullPage from "./pages/Dashboard";
 import SettingsFullPage from "./pages/Settings";
+import JobsFullPage from "./pages/Jobs";
 
 // Login page
 function LoginPage() {
@@ -470,6 +473,12 @@ const settingsRoute = createRoute({
   component: SettingsFullPage,
 });
 
+const jobsRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/jobs",
+  component: JobsFullPage,
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
   shellRoute.addChildren([
@@ -479,6 +488,7 @@ const routeTree = rootRoute.addChildren([
     integrationsRoute,
     logsRoute,
     settingsRoute,
+    jobsRoute,
   ]),
 ]);
 

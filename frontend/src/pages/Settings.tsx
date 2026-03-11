@@ -56,13 +56,13 @@ import { cn } from "@/lib/utils";
 // ─────────────────────────────────────────────────────────────────────────────
 
 const PROVIDERS = [
-  { value: "anthropic", label: "Claude (Anthropic)" },
+  { value: "claude", label: "Claude (Anthropic)" },
   { value: "openai", label: "OpenAI" },
   { value: "ollama", label: "Ollama (local)" },
 ] as const;
 
 const MODELS_BY_PROVIDER: Record<string, string[]> = {
-  anthropic: ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-3-5"],
+  claude: ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-3-5"],
   openai: ["gpt-4o", "gpt-4o-mini", "o1-preview", "o1-mini"],
   ollama: ["llama3.2", "mistral", "gemma2", "codellama", "phi3"],
 };
@@ -172,13 +172,11 @@ function AIProviderSection({ config }: { config: ApiConfigResponse }) {
         ai: {
           activeProvider: provider,
           model,
-          apiKey: apiKey || undefined,
         },
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["config"] });
       toast({ title: "AI provider saved", variant: "success" as any });
-      setApiKey("");
     },
     onError: () => toast({ title: "Save failed", variant: "destructive" }),
   });
@@ -244,16 +242,33 @@ function AIProviderSection({ config }: { config: ApiConfigResponse }) {
         </FormRow>
       </div>
 
-      <FormRow>
-        <FieldLabel>API Key {provider === "ollama" && <span className="text-slate-600">(not required for local)</span>}</FieldLabel>
-        <FieldInput
-          type="password"
-          placeholder="sk-… (leave blank to keep existing)"
-          value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
-          disabled={provider === "ollama"}
-        />
-      </FormRow>
+      {provider !== "ollama" && (
+        <FormRow>
+          <FieldLabel>API Key</FieldLabel>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm">
+              {(provider === "claude" ? config.ai.anthropicConfigured : config.ai.openaiConfigured) ? (
+                <>
+                  <CheckCircle2 className="h-4 w-4 text-green-400 shrink-0" />
+                  <span className="text-green-400">Configured via environment variable</span>
+                </>
+              ) : (
+                <>
+                  <XCircle className="h-4 w-4 text-amber-400 shrink-0" />
+                  <span className="text-amber-400">Not configured — set via environment variable</span>
+                </>
+              )}
+            </div>
+            <FieldInput
+              type="password"
+              placeholder="Temporary key for Test Connection only (not saved)"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+            />
+            <p className="text-xs text-slate-600">API keys must be set in the server environment (.env). The field above is only used by the Test Connection button.</p>
+          </div>
+        </FormRow>
+      )}
 
       {testResult && (
         <div

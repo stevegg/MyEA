@@ -44,11 +44,11 @@ export interface PublicSettings {
     openaiConfigured: boolean;
   };
   platforms: {
-    telegram: { enabled: boolean };
-    discord: { enabled: boolean };
-    slack: { enabled: boolean };
-    whatsapp: { enabled: boolean };
-    signal: { enabled: boolean };
+    telegram: { enabled: boolean; configured: boolean };
+    discord: { enabled: boolean; configured: boolean };
+    slack: { enabled: boolean; configured: boolean };
+    whatsapp: { enabled: boolean; configured: boolean };
+    signal: { enabled: boolean; configured: boolean };
   };
   assistant: {
     timezone: string;
@@ -400,18 +400,23 @@ function mergeWithDefaults(persisted: PersistedSettings, config: AppConfig): Pub
     platforms: {
       telegram: {
         enabled: persisted.platforms?.telegram?.enabled ?? config.platforms.telegram.enabled,
+        configured: Boolean(config.platforms.telegram.botToken),
       },
       discord: {
         enabled: persisted.platforms?.discord?.enabled ?? config.platforms.discord.enabled,
+        configured: Boolean(config.platforms.discord.botToken && config.platforms.discord.clientId),
       },
       slack: {
         enabled: persisted.platforms?.slack?.enabled ?? config.platforms.slack.enabled,
+        configured: Boolean(config.platforms.slack.botToken),
       },
       whatsapp: {
         enabled: persisted.platforms?.whatsapp?.enabled ?? config.platforms.whatsapp.enabled,
+        configured: config.platforms.whatsapp.enabled, // WhatsApp uses web session, no token to check
       },
       signal: {
         enabled: persisted.platforms?.signal?.enabled ?? config.platforms.signal.enabled,
+        configured: Boolean(config.platforms.signal.phoneNumber),
       },
     },
     assistant: {

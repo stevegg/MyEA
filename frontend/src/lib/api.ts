@@ -53,6 +53,43 @@ export interface SkillRegistryEntry {
   updatedAt: string;
 }
 
+export interface ScheduledJobRecord {
+  id: string;
+  name: string;
+  description: string;
+  schedule: string;
+  recurring: boolean;
+  payload: Record<string, unknown>;
+  targetPlatform?: string | null;
+  targetChannelId?: string | null;
+  enabled: boolean;
+  pgBossJobId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastRunAt?: string | null;
+  nextRunAt?: string | null;
+  lastError?: string | null;
+}
+
+export interface CreateJobPayload {
+  name: string;
+  schedule: string;
+  recurring: boolean;
+  description?: string;
+  payload?: Record<string, unknown>;
+  targetPlatform?: string;
+  targetChannelId?: string;
+}
+
+export interface UpdateJobPayload {
+  description?: string;
+  schedule?: string;
+  payload?: Record<string, unknown>;
+  enabled?: boolean;
+  targetPlatform?: string;
+  targetChannelId?: string;
+}
+
 export interface IntegrationRecord {
   id: string;
   name: string;
@@ -119,7 +156,7 @@ export interface UpdateSettingsPayload {
   ai?: {
     activeProvider?: string;
     model?: string;
-    apiKey?: string;
+    ollamaBaseUrl?: string;
   };
   system?: {
     timezone?: string;
@@ -274,12 +311,23 @@ export async function testAIConnection(
 }
 
 export async function getMe(): Promise<ApiUser> {
-  const res = await api.get<ApiUser>("/api/me");
+  // Backend exposes user info at /auth/me (not /api/me)
+  const res = await api.get<ApiUser>("/auth/me");
   return res.data;
 }
 
 export async function updateUser(payload: UpdateUserPayload): Promise<ApiUser> {
-  const res = await api.patch<ApiUser>("/api/me", payload);
+  // Backend has no PATCH /api/me endpoint.
+  // Password changes go to PUT /api/settings/password.
+  // Username changes are not yet supported server-side — silently skip.
+  if (payload.currentPassword && payload.newPassword) {
+    await api.put("/api/settings/password", {
+      currentPassword: payload.currentPassword,
+      newPassword: payload.newPassword,
+    });
+  }
+  // Return the current user info after the update
+  const res = await api.get<ApiUser>("/auth/me");
   return res.data;
 }
 
@@ -454,6 +502,30 @@ export async function clearOldLogs(olderThanDays?: number): Promise<{ deleted: n
     data: { olderThanDays },
   });
   return res.data;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Scheduled Jobs
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getJobs(enabled?: boolean): Promise<ScheduledJobRecord[]> {
+  const params = enabled !== undefined ? { enabled } : {};
+  const res = await api.get<{ data: ScheduledJobRecord[] } | ScheduledJobRecord[]>("/api/jobs", { params });
+  return Array.isArray(res.data) ? res.data : (res.data as any).data ?? [];
+}
+
+export async function createJob(payload: CreateJobPayload): Promise<ScheduledJobRecord> {
+  const res = await api.post<ScheduledJobRecord>("/api/jobs", payload);
+  return res.data;
+}
+
+export async function updateJob(id: string, payload: UpdateJobPayload): Promise<ScheduledJobRecord> {
+  const res = await api.put<ScheduledJobRecord>(`/api/jobs/${id}`, payload);
+  return res.data;
+}
+
+export async function deleteJob(id: string): Promise<void> {
+  await api.delete(`/api/jobs/${id}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

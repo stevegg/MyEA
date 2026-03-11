@@ -10,9 +10,11 @@
 
 import { google, gmail_v1 } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
+import { eq } from "drizzle-orm";
 
 import type { Skill, SkillContext, ExecutionContext, ToolResult } from "../../types";
 import { getErrorMessage, BUILT_IN_SKILL_VERSION } from "../../utils";
+import { integrations } from "../../db/schema";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module-level state
@@ -283,9 +285,33 @@ const emailSkill: Skill = {
   version: BUILT_IN_SKILL_VERSION,
 
   async setup(context: SkillContext): Promise<void> {
-    const { clientId, clientSecret, redirectUri, refreshToken, enabled } = context.config.integrations.gmail;
+    const { clientId, clientSecret, redirectUri, refreshToken: envRefreshToken, enabled } = context.config.integrations.gmail;
 
-    if (!enabled || !clientId || !clientSecret || !refreshToken) {
+    if (!clientId || !clientSecret) {
+      context.logger.warn("Email skill: GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET not set — skill unavailable.");
+      return;
+    }
+
+    // Prefer the refresh token stored in the DB (from the OAuth web flow) over the
+    // env-var token, since the DB token is always the most recently issued one.
+    let refreshToken = envRefreshToken;
+    try {
+      const db = context.db.db as import("../../db").DrizzleDB;
+      const [row] = await db
+        .select({ config: integrations.config })
+        .from(integrations)
+        .where(eq(integrations.name, "gmail"))
+        .limit(1);
+      const dbToken = (row?.config as Record<string, unknown>)?.refreshToken as string | undefined;
+      if (dbToken) {
+        refreshToken = dbToken;
+        context.logger.debug("Email skill: using DB-stored Gmail refresh token.");
+      }
+    } catch (err) {
+      context.logger.warn({ err }, "Email skill: could not read Gmail token from DB, falling back to env var.");
+    }
+
+    if (!enabled || !refreshToken) {
       context.logger.warn("Email skill: Gmail not fully configured — tools will return an error until credentials are set.");
       return;
     }
