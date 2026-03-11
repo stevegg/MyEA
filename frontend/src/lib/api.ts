@@ -129,7 +129,7 @@ export interface ApiConfigResponse {
   };
   platforms: Record<
     string,
-    { enabled: boolean; configured?: boolean }
+    { enabled: boolean; configured: boolean }
   >;
   /** Called "assistant" in the backend /api/settings response */
   assistant?: {
@@ -139,7 +139,7 @@ export interface ApiConfigResponse {
     execTimeoutMs?: number;
   };
   /** Alias so Settings.tsx can use config.system — maps to assistant */
-  system?: {
+  system: {
     timezone: string;
     defaultPlatform?: string;
     proactiveMessaging?: boolean;
