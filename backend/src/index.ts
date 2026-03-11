@@ -159,8 +159,9 @@ async function registerRoutes(opts: {
   scheduler: ReturnType<typeof createSchedulerService>;
   orchestrator: Orchestrator;
   aiManager: AIProviderManager;
+  skillEngineRef: { engine?: SkillEngine };
 }): Promise<void> {
-  const { db, memory, scheduler, orchestrator, aiManager } = opts;
+  const { db, memory, scheduler, orchestrator, aiManager, skillEngineRef } = opts;
 
   // Health check (unauthenticated)
   server.get("/health", async (_req, reply) => {
@@ -184,9 +185,9 @@ async function registerRoutes(opts: {
   const memoryPlugin = (await import("./api/memory")).default;
   await server.register(memoryPlugin, { memory });
 
-  // Skills plugin
+  // Skills plugin — uses a ref container so skillEngine can be assigned after plugin registration
   const skillsPlugin = (await import("./api/skills")).default;
-  await server.register(skillsPlugin, { db, orchestrator });
+  await server.register(skillsPlugin, { db, orchestrator, skillEngineRef });
 
   // Integrations plugin
   const integrationsPlugin = (await import("./api/integrations")).default;
@@ -386,7 +387,11 @@ async function bootstrap(): Promise<void> {
   });
 
   // ── 7. Skills Engine ───────────────────────────────────────
+  // skillEngineRef is declared here so it can be passed to registerRoutes
+  // and populated before any HTTP request can hit the skills API.
+  const skillEngineRef: { engine?: SkillEngine } = {};
   const skillEngine = new SkillEngine(logger, config.volumes.skillsDir);
+  skillEngineRef.engine = skillEngine;
 
   // Delegate all tool execution and tool discovery to the SkillEngine.
   // This gives the orchestrator live access to hot-reloaded tools.
@@ -438,7 +443,7 @@ async function bootstrap(): Promise<void> {
 
   // ── 9. Register Fastify plugins + routes ───────────────────
   await registerPlugins();
-  await registerRoutes({ db, memory, scheduler, orchestrator, aiManager });
+  await registerRoutes({ db, memory, scheduler, orchestrator, aiManager, skillEngineRef });
 
   // ── 10. Start Platform Manager ─────────────────────────────
   await platformManager.start();

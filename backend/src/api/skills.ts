@@ -9,9 +9,10 @@
 
 import type { FastifyInstance, FastifyPluginAsync } from "fastify";
 import fp from "fastify-plugin";
-import { eq, desc } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { DrizzleDB } from "../db";
 import type { Orchestrator } from "../services/orchestrator";
+import type { SkillEngine } from "../skills/engine";
 import { skillsRegistry } from "../db/schema";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -21,6 +22,8 @@ import { skillsRegistry } from "../db/schema";
 interface SkillsPluginOptions {
   db: DrizzleDB;
   orchestrator?: Orchestrator;
+  /** Ref container — engine is assigned after plugin registration. */
+  skillEngineRef?: { engine?: SkillEngine };
   /** Trigger a full reload of custom skills from disk. */
   reloadSkills?: () => Promise<void>;
 }
@@ -30,22 +33,35 @@ const skillsPlugin: FastifyPluginAsync<SkillsPluginOptions> = async (
   opts: SkillsPluginOptions
 ) => {
   const { db } = opts;
+  // skillEngine may be undefined at registration time; read via ref at request time
+  const getEngine = () => opts.skillEngineRef?.engine;
 
   // ── GET /api/skills ────────────────────────────────────────
+  // Read from in-memory engine if available (always up-to-date), fall back to DB.
 
   app.get(
     "/api/skills",
     { preHandler: [app.authenticate] },
     async (_request, reply) => {
-      const rows = await db
-        .select()
-        .from(skillsRegistry)
-        .orderBy(desc(skillsRegistry.builtIn), skillsRegistry.name);
+      const skillEngine = getEngine();
+      if (skillEngine) {
+        const entries = skillEngine.getRegistry();
+        // Merge with DB to pick up persisted `enabled` overrides
+        const dbRows = await db.select().from(skillsRegistry);
+        const enabledMap = new Map(dbRows.map((r) => [r.name, r.enabled]));
+        const data = entries
+          .map((e) => ({
+            ...e,
+            enabled: enabledMap.has(e.name) ? enabledMap.get(e.name)! : e.enabled,
+          }))
+          .sort((a, b) => (b.builtIn ? 1 : 0) - (a.builtIn ? 1 : 0) || a.name.localeCompare(b.name));
+        return reply.send({ data, total: data.length });
+      }
 
-      return reply.send({
-        data: rows.map(formatSkill),
-        total: rows.length,
-      });
+      // Fallback: read from DB
+      const rows = await db.select().from(skillsRegistry);
+      rows.sort((a, b) => (b.builtIn ? 1 : 0) - (a.builtIn ? 1 : 0) || a.name.localeCompare(b.name));
+      return reply.send({ data: rows.map(formatSkill), total: rows.length });
     }
   );
 
@@ -56,6 +72,17 @@ const skillsPlugin: FastifyPluginAsync<SkillsPluginOptions> = async (
     { preHandler: [app.authenticate] },
     async (request, reply) => {
       const { name } = request.params;
+
+      const skillEngine = getEngine();
+      if (skillEngine) {
+        const entry = skillEngine.getRegistry().find((e) => e.name === name);
+        if (!entry) {
+          return reply.status(404).send({ error: `Skill "${name}" not found` });
+        }
+        // Merge DB-persisted enabled state
+        const [dbRow] = await db.select().from(skillsRegistry).where(eq(skillsRegistry.name, name)).limit(1);
+        return reply.send({ ...entry, enabled: dbRow ? dbRow.enabled : entry.enabled });
+      }
 
       const [row] = await db
         .select()
@@ -91,25 +118,41 @@ const skillsPlugin: FastifyPluginAsync<SkillsPluginOptions> = async (
     async (request, reply) => {
       const { name } = request.params;
       const { enabled } = request.body;
+      const skillEngine = getEngine();
 
-      const [existing] = await db
-        .select()
-        .from(skillsRegistry)
-        .where(eq(skillsRegistry.name, name))
-        .limit(1);
-
-      if (!existing) {
-        return reply.status(404).send({ error: `Skill "${name}" not found` });
+      // Check the skill exists (in engine or DB)
+      const entry = skillEngine?.getRegistry().find((e) => e.name === name);
+      if (!entry) {
+        const [existing] = await db.select().from(skillsRegistry).where(eq(skillsRegistry.name, name)).limit(1);
+        if (!existing) {
+          return reply.status(404).send({ error: `Skill "${name}" not found` });
+        }
       }
 
-      const [updated] = await db
-        .update(skillsRegistry)
-        .set({ enabled, updatedAt: new Date() })
-        .where(eq(skillsRegistry.name, name))
-        .returning();
+      // Persist the enabled state to DB (upsert)
+      await db
+        .insert(skillsRegistry)
+        .values({
+          id: entry?.id ?? name,
+          name,
+          description: entry?.description ?? "",
+          version: entry?.version ?? "0.0.0",
+          filePath: entry?.filePath ?? null,
+          enabled,
+          builtIn: entry?.builtIn ?? false,
+          tools: (entry?.tools ?? []) as any,
+          loadedAt: entry?.loadedAt ? new Date(entry.loadedAt) : new Date(),
+        })
+        .onConflictDoUpdate({
+          target: skillsRegistry.name,
+          set: { enabled, updatedAt: new Date() },
+        });
+
+      // Also update the in-memory engine state
+      skillEngine?.setEnabled(name, enabled);
 
       request.log.info({ name, enabled }, "Skill toggled via PATCH");
-      return reply.send(formatSkill(updated));
+      return reply.send({ ...(entry ?? { name }), enabled });
     }
   );
 
@@ -132,25 +175,38 @@ const skillsPlugin: FastifyPluginAsync<SkillsPluginOptions> = async (
     async (request, reply) => {
       const { name } = request.params;
       const { enabled } = request.body;
+      const skillEngine = getEngine();
 
-      const [existing] = await db
-        .select()
-        .from(skillsRegistry)
-        .where(eq(skillsRegistry.name, name))
-        .limit(1);
-
-      if (!existing) {
-        return reply.status(404).send({ error: `Skill "${name}" not found` });
+      const entry = skillEngine?.getRegistry().find((e) => e.name === name);
+      if (!entry) {
+        const [existing] = await db.select().from(skillsRegistry).where(eq(skillsRegistry.name, name)).limit(1);
+        if (!existing) {
+          return reply.status(404).send({ error: `Skill "${name}" not found` });
+        }
       }
 
-      const [updated] = await db
-        .update(skillsRegistry)
-        .set({ enabled, updatedAt: new Date() })
-        .where(eq(skillsRegistry.name, name))
-        .returning();
+      await db
+        .insert(skillsRegistry)
+        .values({
+          id: entry?.id ?? name,
+          name,
+          description: entry?.description ?? "",
+          version: entry?.version ?? "0.0.0",
+          filePath: entry?.filePath ?? null,
+          enabled,
+          builtIn: entry?.builtIn ?? false,
+          tools: (entry?.tools ?? []) as any,
+          loadedAt: entry?.loadedAt ? new Date(entry.loadedAt) : new Date(),
+        })
+        .onConflictDoUpdate({
+          target: skillsRegistry.name,
+          set: { enabled, updatedAt: new Date() },
+        });
+
+      skillEngine?.setEnabled(name, enabled);
 
       request.log.info({ name, enabled }, "Skill toggled");
-      return reply.send(formatSkill(updated));
+      return reply.send({ ...(entry ?? { name }), enabled });
     }
   );
 

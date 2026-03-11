@@ -38,8 +38,9 @@ services:
       - ./backend/src:/app/src:delegated
       - ./backend/drizzle:/app/drizzle:delegated
       - ./backend/tsconfig.json:/app/tsconfig.json:ro
+      # Bind-mount skills locally so you can drop .ts files in and they hot-reload
+      - ./volumes/skills:/app/volumes/skills:delegated
       # Named volumes for runtime data (same as prod)
-      - skills_data:/app/volumes/skills
       - files_data:/app/volumes/files
       - logs_data:/app/volumes/logs
       - whatsapp_session:/app/volumes/whatsapp

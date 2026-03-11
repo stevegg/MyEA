@@ -33,7 +33,12 @@ const MAX_CONTENT_CHARS = 50_000;
 
 async function getBrowser(): Promise<Browser> {
   if (!browser || !browser.isConnected()) {
-    browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+    browser = await chromium.launch({
+      headless: true,
+      // Use system Chromium when PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH is set (Docker dev/prod)
+      executablePath: process.env["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"] || undefined,
+      args: ["--no-sandbox", "--disable-dev-shm-usage"],
+    });
   }
   return browser;
 }
@@ -252,7 +257,9 @@ const webSkill: Skill = {
       context.logger.info("Web skill ready — browser launched.");
     } catch (err) {
       // Non-fatal: browser will be launched on first use.
-      context.logger.warn({ err }, "Web skill: browser pre-launch failed — will retry on first use.");
+      // Log just the message to avoid spamming the log with the full Playwright install hint.
+      const msg = err instanceof Error ? err.message.split("\n")[0] : String(err);
+      context.logger.warn(`Web skill: browser pre-launch failed (${msg}) — will retry on first use.`);
     }
   },
 
