@@ -186,8 +186,24 @@ export class SlackConnector extends BasePlatformConnector {
     app.message(async ({ message, say }) => {
       const msg = message as any;
 
+      this.log.debug(
+        {
+          ts: msg.ts,
+          channel: msg.channel,
+          channel_type: msg.channel_type,
+          subtype: msg.subtype ?? null,
+          bot_id: msg.bot_id ?? null,
+          user: msg.user ?? null,
+          text: (msg.text ?? "").slice(0, 80),
+        },
+        "app.message() received"
+      );
+
       // Only handle messages from humans (no bot messages, no message_changed subtypes)
-      if (msg.bot_id || msg.subtype) return;
+      if (msg.bot_id || msg.subtype) {
+        this.log.debug({ bot_id: msg.bot_id, subtype: msg.subtype }, "app.message() filtered out");
+        return;
+      }
 
       const platformMsg: PlatformMessage = {
         id: `slack:${msg.ts}`,
@@ -210,12 +226,19 @@ export class SlackConnector extends BasePlatformConnector {
         // Non-fatal — proceed without display name
       }
 
+      this.log.debug({ id: platformMsg.id, channel: platformMsg.channelId }, "app.message() dispatching");
       await this.dispatchMessage(platformMsg);
+      this.log.debug({ id: platformMsg.id }, "app.message() dispatch complete");
     });
 
     // @Mentions in channels
     app.event("app_mention", async ({ event }) => {
       const ev = event as any;
+
+      this.log.debug(
+        { ts: ev.ts, channel: ev.channel, channel_type: ev.channel_type ?? null, user: ev.user },
+        "app_mention received"
+      );
 
       // Strip the mention from the text
       const text = (ev.text ?? "")
