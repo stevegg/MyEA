@@ -605,9 +605,28 @@ JSON array only, no other text:`,
   private _sanitizeHistory(
     rows: typeof messages.$inferSelect[]
   ): typeof messages.$inferSelect[] {
-    // 1. Drop leading orphaned tool_result rows
-    while (rows.length > 0 && rows[0].role === "tool") {
-      rows = rows.slice(1);
+    // 1. Drop leading orphaned tool/assistant rows — Anthropic requires the
+    //    first message to be a user turn. An assistant message with tool_use
+    //    at the boundary also needs its paired tool rows stripped.
+    let changed = true;
+    while (changed && rows.length > 0) {
+      changed = false;
+      // Strip leading tool_result rows (orphaned — no preceding tool_use)
+      if (rows[0].role === "tool") {
+        rows = rows.slice(1);
+        changed = true;
+        continue;
+      }
+      // Strip leading assistant messages (violates user-first requirement)
+      if (rows[0].role === "assistant") {
+        rows = rows.slice(1);
+        // Also strip any immediately following tool_result rows that were
+        // paired with the assistant's tool_use
+        while (rows.length > 0 && rows[0].role === "tool") {
+          rows = rows.slice(1);
+        }
+        changed = true;
+      }
     }
 
     // 2. Drop trailing assistant messages that contain an unanswered tool_use
