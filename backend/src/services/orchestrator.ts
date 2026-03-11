@@ -574,12 +574,17 @@ JSON array only, no other text:`,
   private async _loadHistory(conversationId: string): Promise<typeof messages.$inferSelect[]> {
     const { db } = this.opts;
 
-    return db
+    // Fetch the MOST RECENT messages (desc), then reverse to chronological order.
+    // Using asc+limit fetched the *oldest* N messages, which left orphaned
+    // tool_use blocks when the conversation grew past HISTORY_WINDOW rows.
+    const rows = await db
       .select()
       .from(messages)
       .where(eq(messages.conversationId, conversationId))
-      .orderBy(asc(messages.createdAt))
+      .orderBy(desc(messages.createdAt))
       .limit(HISTORY_WINDOW);
+
+    return rows.reverse();
   }
 
   private async _insertMessage(
