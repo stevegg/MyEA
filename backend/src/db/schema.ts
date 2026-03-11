@@ -11,6 +11,7 @@ import {
   varchar,
   boolean,
   integer,
+  bigserial,
   jsonb,
   timestamp,
   uuid,
@@ -147,6 +148,8 @@ export const messages = pgTable(
   "messages",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    /** Monotonically increasing sequence for stable chronological ordering. */
+    seq: bigserial("seq", { mode: "bigint" }).notNull(),
     conversationId: uuid("conversation_id")
       .notNull()
       .references(() => conversations.id, { onDelete: "cascade" }),
@@ -174,6 +177,7 @@ export const messages = pgTable(
   (t) => ({
     conversationIdx: index("messages_conversation_idx").on(t.conversationId),
     createdAtIdx: index("messages_created_at_idx").on(t.createdAt),
+    seqIdx: index("messages_seq_idx").on(t.seq),
     platformMessageIdx: index("messages_platform_message_idx").on(
       t.platform,
       t.platformMessageId

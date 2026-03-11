@@ -574,17 +574,58 @@ JSON array only, no other text:`,
   private async _loadHistory(conversationId: string): Promise<typeof messages.$inferSelect[]> {
     const { db } = this.opts;
 
-    // Fetch the MOST RECENT messages (desc), then reverse to chronological order.
-    // Using asc+limit fetched the *oldest* N messages, which left orphaned
-    // tool_use blocks when the conversation grew past HISTORY_WINDOW rows.
+    // Fetch the MOST RECENT messages ordered by insertion sequence (desc),
+    // then reverse to restore chronological order.
+    // We sort by `seq` (bigserial) rather than `created_at` so that messages
+    // batch-inserted in the same transaction get a stable, deterministic order.
     const rows = await db
       .select()
       .from(messages)
       .where(eq(messages.conversationId, conversationId))
-      .orderBy(desc(messages.createdAt))
+      .orderBy(desc(messages.seq))
       .limit(HISTORY_WINDOW);
 
-    return rows.reverse();
+    return this._sanitizeHistory(rows.reverse());
+  }
+
+  /**
+   * Removes orphaned tool_use / tool_result messages that would cause the
+   * Anthropic API to reject the request with a 400.
+   *
+   * Two cases arise when the HISTORY_WINDOW slices through a tool call pair:
+   *
+   *   1. The window starts mid-pair: the tool_result is first but its
+   *      tool_use assistant message was cut off. Strip leading tool rows.
+   *
+   *   2. The window ends mid-pair: an assistant message with a tool_use
+   *      is last but its tool_result was cut off. Strip the trailing
+   *      assistant tool_use message (and any adjacent text-only messages
+   *      that were part of the same AI turn).
+   */
+  private _sanitizeHistory(
+    rows: typeof messages.$inferSelect[]
+  ): typeof messages.$inferSelect[] {
+    // 1. Drop leading orphaned tool_result rows
+    while (rows.length > 0 && rows[0].role === "tool") {
+      rows = rows.slice(1);
+    }
+
+    // 2. Drop trailing assistant messages that contain an unanswered tool_use
+    // Walk backwards: if the last assistant message has a __tool_calls__ marker
+    // and there is no tool row immediately after it, it's dangling.
+    while (rows.length > 0) {
+      const last = rows[rows.length - 1];
+      if (last.role === "tool") break; // ends on a tool_result — fine
+
+      if (last.role === "assistant" && last.content.includes("__tool_calls__:")) {
+        // Dangling tool_use — remove it
+        rows = rows.slice(0, rows.length - 1);
+      } else {
+        break;
+      }
+    }
+
+    return rows;
   }
 
   private async _insertMessage(
