@@ -41,6 +41,7 @@ export type Platform =
   | "slack"
   | "whatsapp"
   | "signal"
+  | "web"      // admin UI web chat
   | "internal"; // used for proactive/scheduled messages
 
 /** A normalised inbound message from any platform. */
@@ -138,12 +139,20 @@ export interface PlatformConnector {
 
 export type AIProviderName = "claude" | "openai" | "ollama";
 
+export interface AIMessageImage {
+  /** base64-encoded image data (no data: prefix). */
+  base64: string;
+  mimeType: string;
+}
+
 export interface AIMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
   /** Present when role is "tool". */
   toolCallId?: string;
   toolName?: string;
+  /** Inline images attached to a user message (vision). */
+  images?: AIMessageImage[];
 }
 
 export interface AITool {
@@ -586,4 +595,5 @@ export type WSEvent =
   | { type: "skill_error"; payload: { name: string; error: string } }
   | { type: "ai_provider_changed"; payload: { provider: AIProviderName; model: string } }
   | { type: "integration_status"; payload: { name: IntegrationName; status: IntegrationStatus } }
-  | { type: "log"; payload: LogEntry };
+  | { type: "log"; payload: LogEntry }
+  | { type: "conversation_updated"; payload: { conversationId: string | null; platform: string } };

@@ -21,7 +21,9 @@ services:
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     deploy:
-      resources: {}
+      resources:
+        limits:
+          memory: "0"
 
   # ── Backend (hot-reload via tsx watch) ─────────────────────
   backend:
@@ -43,7 +45,9 @@ services:
       - whatsapp_session:/app/volumes/whatsapp
     command: ["./entrypoint.sh"]
     deploy:
-      resources: {}
+      resources:
+        limits:
+          memory: "0"
 
   # ── Frontend (Vite dev server with HMR) ────────────────────
   frontend:
@@ -51,10 +55,16 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       target: development
+    restart: on-failure
     environment:
       NODE_ENV: development
-      VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
-      VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:3001}
+      # Inside the container the backend is reachable via the Docker service name.
+      # These are hardcoded (not shell-interpolated) so the Makefile's `export`
+      # of VITE_API_URL=http://localhost:3001 from .env doesn't override them.
+      VITE_API_URL: "http://backend:3001"
+      VITE_WS_URL: "ws://backend:3001"
+      VITE_PORT: "5173"
+      VITE_HMR_CLIENT_PORT: ${FRONTEND_PORT:-3000}
     volumes:
       # Mount source; node_modules stays inside the container
       - ./frontend/src:/app/src:delegated
@@ -62,16 +72,23 @@ services:
       - ./frontend/index.html:/app/index.html:ro
       - ./frontend/vite.config.ts:/app/vite.config.ts:ro
       - ./frontend/tsconfig.json:/app/tsconfig.json:ro
+      - ./frontend/tsconfig.node.json:/app/tsconfig.node.json:ro
+      - ./frontend/tailwind.config.ts:/app/tailwind.config.ts:ro
+      - ./frontend/postcss.config.js:/app/postcss.config.js:ro
     ports:
       - "${FRONTEND_PORT:-3000}:5173"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:5173 || exit 1"]
+      disable: true
     deploy:
-      resources: {}
+      resources:
+        limits:
+          memory: "0"  # no limit in dev (prod sets 128m which OOM-kills Vite+esbuild)
 
   # ── Ollama (no resource cap in dev) ────────────────────────
   ollama:
     ports:
       - "11434:11434"
     deploy:
-      resources: {}
+      resources:
+        limits:
+          memory: "0"

@@ -15,6 +15,7 @@ import type {
   AIGenerateOptions,
   AIResponse,
   AIMessage,
+  AIMessageImage,
   AITool,
   AIToolCall,
 } from "../types";
@@ -251,8 +252,25 @@ function toAnthropicMessages(messages: AIMessage[]): AnthropicMessageParam[] {
       continue;
     }
 
-    // user or any other role — pass through as text
-    result.push({ role: "user", content: msg.content });
+    // user or any other role — pass through as text, with optional images
+    if (msg.images?.length) {
+      type ImageBlock = { type: "image"; source: { type: "base64"; media_type: string; data: string } };
+      type TextBlock = { type: "text"; text: string };
+      const contentBlocks: Array<ImageBlock | TextBlock> = [
+        ...msg.images.map((img: AIMessageImage): ImageBlock => ({
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: img.mimeType,
+            data: img.base64,
+          },
+        })),
+        ...(msg.content ? [{ type: "text" as const, text: msg.content }] : []),
+      ];
+      result.push({ role: "user", content: contentBlocks as AnthropicMessageParam["content"] });
+    } else {
+      result.push({ role: "user", content: msg.content });
+    }
     i++;
   }
 

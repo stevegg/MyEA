@@ -10,8 +10,13 @@ export default defineConfig({
     },
   },
   server: {
-    port: 3000,
+    port: Number(process.env.VITE_PORT ?? 5173),
     host: true,
+    hmr: {
+      // When running behind Docker port-mapping (container:5173 → host:3000),
+      // tell the browser to use the host-facing port for HMR websocket.
+      clientPort: Number(process.env.VITE_HMR_CLIENT_PORT ?? process.env.VITE_PORT ?? 5173),
+    },
     proxy: {
       "/api": {
         target: process.env.VITE_API_URL ?? "http://localhost:3001",

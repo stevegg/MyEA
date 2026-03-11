@@ -59,6 +59,12 @@ run_migrations() {
   info "Running database migrations..."
 
   if [ "${NODE_ENV}" = "development" ]; then
+    # In development, generate migration files if they don't exist yet
+    # (in production this is done at image build time by the Dockerfile)
+    if [ ! -f "drizzle/meta/_journal.json" ]; then
+      info "No migration files found — generating from schema..."
+      npx drizzle-kit generate --config=drizzle.config.ts
+    fi
     # In development use tsx (no compile step needed)
     npx tsx src/db/migrate.ts
   else

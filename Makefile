@@ -66,7 +66,8 @@ up:
 
 .PHONY: dev
 dev:
-	$(COMPOSE) $(COMPOSE_DEV_FILES) up
+	@docker rm -f myea-frontend 2>/dev/null || true
+	$(COMPOSE) $(COMPOSE_DEV_FILES) up --build frontend
 	# Intentionally no -d so logs stream to the terminal in dev mode
 
 .PHONY: dev-detach
@@ -75,7 +76,7 @@ dev-detach:
 
 .PHONY: down
 down:
-	$(COMPOSE) -f $(COMPOSE_FILE) down
+	$(COMPOSE) $(COMPOSE_DEV_FILES) down --remove-orphans
 
 .PHONY: restart
 restart: down up

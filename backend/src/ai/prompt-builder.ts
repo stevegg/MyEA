@@ -83,6 +83,7 @@ const PLATFORM_DISPLAY: Record<Platform, string> = {
   slack:     "Slack",
   whatsapp:  "WhatsApp",
   signal:    "Signal",
+  web:       "Web Admin UI",
   internal:  "internal scheduler",
 };
 

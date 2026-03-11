@@ -308,6 +308,82 @@ const integrationsPlugin: FastifyPluginAsync<IntegrationsPluginOptions> = async 
     }
   );
 
+  // ── GET /auth/gmail/callback ───────────────────────────────
+  // Legacy alias matching GMAIL_REDIRECT_URI=http://localhost:3001/auth/gmail/callback
+
+  app.get<{ Querystring: { code?: string; error?: string; state?: string } }>(
+    "/auth/gmail/callback",
+    async (request, reply) => {
+      const { code, error } = request.query;
+
+      if (error) {
+        const safeError = htmlEncode(String(error).slice(0, 200));
+        return reply
+          .type("text/html")
+          .send(`<html><body><h2>Gmail OAuth Error</h2><p>${safeError}</p></body></html>`);
+      }
+
+      if (!code) {
+        return reply.status(400).send({ error: "Missing authorization code" });
+      }
+
+      const { clientId, clientSecret, redirectUri } = config.integrations.gmail;
+
+      if (!clientId || !clientSecret || !redirectUri) {
+        return reply.status(500).send({ error: "Gmail OAuth2 not configured on the server" });
+      }
+
+      try {
+        const { google } = await import("googleapis");
+        const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+        const { tokens } = await oauth2Client.getToken(code);
+
+        await db
+          .insert(integrations)
+          .values({
+            name: "gmail",
+            displayName: "Gmail",
+            enabled: true,
+            status: "connected",
+            config: {
+              refreshToken: tokens.refresh_token,
+              accessToken: tokens.access_token,
+              expiryDate: tokens.expiry_date,
+              tokenType: tokens.token_type,
+            },
+          })
+          .onConflictDoUpdate({
+            target: integrations.name,
+            set: {
+              enabled: true,
+              status: "connected",
+              config: {
+                refreshToken: tokens.refresh_token,
+                accessToken: tokens.access_token,
+                expiryDate: tokens.expiry_date,
+                tokenType: tokens.token_type,
+              },
+              updatedAt: new Date(),
+              errorMessage: null,
+            },
+          });
+
+        request.log.info("Gmail OAuth2 callback completed successfully (legacy path)");
+
+        return reply
+          .type("text/html")
+          .send(
+            `<html><body><h2>Gmail Connected</h2><p>You can close this tab and return to myEA.</p><script>window.close();</script></body></html>`
+          );
+      } catch (err) {
+        request.log.error({ err }, "Gmail OAuth2 token exchange failed (legacy path)");
+        return reply
+          .type("text/html")
+          .send(`<html><body><h2>OAuth Error</h2><p>Token exchange failed. Please try again.</p></body></html>`);
+      }
+    }
+  );
+
   // ── GET /api/integrations/:id/test ────────────────────────
 
   app.get<{ Params: { id: string } }>(

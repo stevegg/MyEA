@@ -105,7 +105,7 @@ services:
       - backend
     environment:
       - MODE=native
-      - AUTO_RECEIVE_SCHEDULE=0/10 * * * * *
+      - AUTO_RECEIVE_SCHEDULE=*/10 * * * *
     volumes:
       - signal_data:/home/.local/share/signal-cli
     expose:
@@ -139,64 +139,22 @@ services:
         condition: service_started
       signal-cli:
         condition: service_started
+    # Load secrets and optional API keys directly from .env, bypassing shell env
+    # interpolation (which can be empty when running under tools like Claude Code).
+    env_file:
+      - path: .env
+        required: false
     environment:
+      # These override env_file values where we need container-internal addresses
+      # or where compose-time interpolation is safe (no sensitive data).
       NODE_ENV: ${NODE_ENV:-production}
       DATABASE_URL: postgresql://${POSTGRES_USER:-myea}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-myea}
-      JWT_SECRET: ${JWT_SECRET}
-      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
-      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-      # Only the bcrypt hash is passed to the container — never the plain-text password.
-      # Generate with: node -e "require('bcryptjs').hash('yourpassword',12).then(console.log)"
-      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH}
-      # AI Providers
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OLLAMA_BASE_URL: http://ollama:11434
-      ACTIVE_AI_PROVIDER: ${ACTIVE_AI_PROVIDER:-claude}
-      AI_MODEL: ${AI_MODEL:-claude-opus-4-5}
-      # Telegram
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
-      # Discord
-      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
-      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
-      DISCORD_ENABLED: ${DISCORD_ENABLED:-false}
-      # Slack
-      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
-      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
-      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
-      SLACK_ENABLED: ${SLACK_ENABLED:-false}
-      # WhatsApp
-      WHATSAPP_ENABLED: ${WHATSAPP_ENABLED:-false}
-      # Signal
-      SIGNAL_PHONE_NUMBER: ${SIGNAL_PHONE_NUMBER:-}
       SIGNAL_CLI_URL: http://signal-cli:8080
-      SIGNAL_ENABLED: ${SIGNAL_ENABLED:-false}
-      # Gmail OAuth2
-      GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:-}
-      GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:-}
-      GMAIL_REDIRECT_URI: ${GMAIL_REDIRECT_URI:-}
-      GMAIL_REFRESH_TOKEN: ${GMAIL_REFRESH_TOKEN:-}
-      GMAIL_ENABLED: ${GMAIL_ENABLED:-false}
-      # GitHub
-      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
-      GITHUB_ENABLED: ${GITHUB_ENABLED:-false}
-      # Spotify
-      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
-      SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
-      SPOTIFY_REDIRECT_URI: ${SPOTIFY_REDIRECT_URI:-}
-      SPOTIFY_REFRESH_TOKEN: ${SPOTIFY_REFRESH_TOKEN:-}
-      SPOTIFY_ENABLED: ${SPOTIFY_ENABLED:-false}
-      # Smart Home
-      HOME_ASSISTANT_URL: ${HOME_ASSISTANT_URL:-}
-      HOME_ASSISTANT_TOKEN: ${HOME_ASSISTANT_TOKEN:-}
-      SMART_HOME_ENABLED: ${SMART_HOME_ENABLED:-false}
       # Volume paths (inside container)
       SKILLS_DIR: /app/volumes/skills
       FILES_DIR: /app/volumes/files
       LOGS_DIR: /app/volumes/logs
-      # Server
       BACKEND_PORT: ${BACKEND_PORT:-3001}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
     volumes:
@@ -233,8 +191,8 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-    ports:
-      - "${FRONTEND_PORT:-3000}:80"
+    expose:
+      - "80"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:80 || exit 1"]
       interval: 15s

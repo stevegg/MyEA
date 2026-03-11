@@ -30,6 +30,7 @@ export const platformEnum = pgEnum("platform", [
   "slack",
   "whatsapp",
   "signal",
+  "web",
   "internal",
 ]);
 

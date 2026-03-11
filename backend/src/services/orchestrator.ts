@@ -216,6 +216,23 @@ export class Orchestrator {
       toolName: m.toolName ?? undefined,
     }));
 
+    // Attach inline images (vision) to the last user message if present
+    if (inbound.attachments?.length) {
+      const imageAttachments = inbound.attachments
+        .filter((a) => a.type === "image" && a.url?.startsWith("data:"))
+        .map((a) => {
+          const [prefix, base64] = (a.url ?? "").split(",");
+          return { base64, mimeType: a.mimeType ?? prefix.replace("data:", "").replace(";base64", "") };
+        });
+      if (imageAttachments.length > 0) {
+        // The last message in aiMessages is the user message we just persisted
+        const lastMsg = aiMessages[aiMessages.length - 1];
+        if (lastMsg && lastMsg.role === "user") {
+          lastMsg.images = imageAttachments;
+        }
+      }
+    }
+
     // 7. Run the AI + tool loop
     const { finalContent, allNewMessages } = await this._runAILoop({
       conversation,

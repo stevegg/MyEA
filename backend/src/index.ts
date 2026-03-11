@@ -176,6 +176,10 @@ async function registerRoutes(opts: {
   const conversationsPlugin = (await import("./api/conversations")).default;
   await server.register(conversationsPlugin, { db });
 
+  // Web chat plugin — routes admin UI messages through the orchestrator
+  const chatPlugin = (await import("./api/chat")).default;
+  await server.register(chatPlugin, { db, orchestrator, broadcast });
+
   // Memory plugin
   const memoryPlugin = (await import("./api/memory")).default;
   await server.register(memoryPlugin, { memory });

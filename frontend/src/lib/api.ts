@@ -85,16 +85,27 @@ export interface ApiConfigResponse {
   ai: {
     activeProvider: string;
     model: string;
-    availableProviders: string[];
+    availableProviders?: string[];
+    ollamaBaseUrl?: string;
+    anthropicConfigured?: boolean;
+    openaiConfigured?: boolean;
   };
   platforms: Record<
     string,
-    { enabled: boolean; configured: boolean }
+    { enabled: boolean; configured?: boolean }
   >;
-  system: {
+  /** Called "assistant" in the backend /api/settings response */
+  assistant?: {
     timezone: string;
     defaultPlatform?: string;
-    proactiveMessaging: boolean;
+    maxHistory?: number;
+    execTimeoutMs?: number;
+  };
+  /** Alias so Settings.tsx can use config.system — maps to assistant */
+  system?: {
+    timezone: string;
+    defaultPlatform?: string;
+    proactiveMessaging?: boolean;
   };
 }
 
@@ -150,7 +161,9 @@ export interface AIProviderTestResult {
 // Axios instance with JWT interceptors
 // ─────────────────────────────────────────────────────────────────────────────
 
-const API_BASE = (import.meta as any).env?.VITE_API_URL ?? "";
+// Empty baseURL — requests go to the same origin.
+// Vite proxy (dev) and nginx (prod) handle routing /api and /auth to the backend.
+const API_BASE = "";
 
 export const api: AxiosInstance = axios.create({
   baseURL: API_BASE,
@@ -211,15 +224,40 @@ export async function checkFirstRun(): Promise<{ firstRun: boolean }> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getConfig(): Promise<ApiConfigResponse> {
-  const res = await api.get<ApiConfigResponse>("/api/config");
-  return res.data;
+  // /api/settings returns the full config including assistant (timezone etc.)
+  // /api/config only returns ai + platforms + integrations (no system/assistant)
+  const res = await api.get<ApiConfigResponse>("/api/settings");
+  const data = res.data as any;
+  // Normalise: backend uses "assistant", Settings.tsx uses "system" — expose both
+  if (data.assistant && !data.system) {
+    data.system = {
+      timezone: data.assistant.timezone,
+      defaultPlatform: data.assistant.defaultPlatform,
+      proactiveMessaging: false,
+    };
+  }
+  return data as ApiConfigResponse;
 }
 
 export async function updateSettings(
   payload: UpdateSettingsPayload
 ): Promise<ApiConfigResponse> {
-  const res = await api.patch<ApiConfigResponse>("/api/config", payload);
-  return res.data;
+  // Map frontend "system" key back to backend "assistant" key
+  const backendPayload: any = { ...payload };
+  if (payload.system && !backendPayload.assistant) {
+    backendPayload.assistant = payload.system;
+    delete backendPayload.system;
+  }
+  const res = await api.put<ApiConfigResponse>("/api/settings", backendPayload);
+  const data = res.data as any;
+  if (data.assistant && !data.system) {
+    data.system = {
+      timezone: data.assistant.timezone,
+      defaultPlatform: data.assistant.defaultPlatform,
+      proactiveMessaging: false,
+    };
+  }
+  return data as ApiConfigResponse;
 }
 
 export async function testAIConnection(
@@ -227,7 +265,7 @@ export async function testAIConnection(
   model: string,
   apiKey?: string
 ): Promise<AIProviderTestResult> {
-  const res = await api.post<AIProviderTestResult>("/api/config/test-ai", {
+  const res = await api.post<AIProviderTestResult>("/api/settings/test-ai", {
     provider,
     model,
     apiKey,
@@ -249,21 +287,42 @@ export async function updateUser(payload: UpdateUserPayload): Promise<ApiUser> {
 // Conversations
 // ─────────────────────────────────────────────────────────────────────────────
 
+export interface ChatImage {
+  base64: string;
+  mimeType: string;
+}
+
+export async function sendChat(
+  message: string,
+  conversationId?: string,
+  images?: ChatImage[]
+): Promise<{ conversationId: string; reply: string }> {
+  const res = await api.post<{ conversationId: string; reply: string }>("/api/chat", {
+    message,
+    conversationId,
+    ...(images && images.length > 0 ? { images } : {}),
+  });
+  return res.data;
+}
+
 export async function getConversations(
   platform?: string
 ): Promise<ConversationSummary[]> {
   const params = platform ? { platform } : {};
-  const res = await api.get<ConversationSummary[]>("/api/conversations", { params });
-  return res.data;
+  const res = await api.get<{ data: ConversationSummary[] } | ConversationSummary[]>(
+    "/api/conversations",
+    { params }
+  );
+  return Array.isArray(res.data) ? res.data : (res.data as any).data ?? [];
 }
 
 export async function getConversationMessages(
   conversationId: string
 ): Promise<MessageRecord[]> {
-  const res = await api.get<MessageRecord[]>(
+  const res = await api.get<{ data: MessageRecord[] } | MessageRecord[]>(
     `/api/conversations/${conversationId}/messages`
   );
-  return res.data;
+  return Array.isArray(res.data) ? res.data : (res.data as any).data ?? [];
 }
 
 export async function deleteConversation(conversationId: string): Promise<void> {
@@ -279,8 +338,8 @@ export async function clearAllConversations(): Promise<void> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getSkills(): Promise<SkillRegistryEntry[]> {
-  const res = await api.get<SkillRegistryEntry[]>("/api/skills");
-  return res.data;
+  const res = await api.get<{ data: SkillRegistryEntry[] } | SkillRegistryEntry[]>("/api/skills");
+  return Array.isArray(res.data) ? res.data : (res.data as any).data ?? [];
 }
 
 export async function toggleSkill(
@@ -314,30 +373,45 @@ export async function deleteSkill(name: string): Promise<void> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getIntegrations(): Promise<IntegrationRecord[]> {
-  const res = await api.get<IntegrationRecord[]>("/api/integrations");
-  return res.data;
+  const res = await api.get<{ data: IntegrationRecord[] } | IntegrationRecord[]>("/api/integrations");
+  return Array.isArray(res.data) ? res.data : (res.data as any).data ?? [];
 }
 
 export async function connectIntegration(
   name: string,
   payload: IntegrationConnectPayload
 ): Promise<IntegrationRecord> {
-  const res = await api.post<IntegrationRecord>(
-    `/api/integrations/${name}/connect`,
-    payload
-  );
+  // Upsert via POST /api/integrations (onConflictDoUpdate on name)
+  const displayName = payload.name ?? name.charAt(0).toUpperCase() + name.slice(1);
+  const config: Record<string, unknown> = {};
+  if (payload.apiKey) config.apiKey = payload.apiKey;
+  if (payload.token) config.token = payload.token;
+  if (payload.baseUrl) config.baseUrl = payload.baseUrl;
+  const res = await api.post<IntegrationRecord>("/api/integrations", {
+    name,
+    displayName,
+    config,
+    enabled: true,
+  });
   return res.data;
 }
 
 export async function disconnectIntegration(name: string): Promise<void> {
-  await api.post(`/api/integrations/${name}/disconnect`);
+  // Upsert with enabled: false — backend onConflictDoUpdate keeps the name unique
+  const displayName = name.charAt(0).toUpperCase() + name.slice(1);
+  await api.post("/api/integrations", {
+    name,
+    displayName,
+    enabled: false,
+    config: {},
+  });
 }
 
 export async function getOAuthUrl(
   name: string
 ): Promise<{ url: string }> {
-  const res = await api.get<{ url: string }>(`/api/integrations/${name}/oauth-url`);
-  return res.data;
+  const res = await api.post<{ authUrl: string }>(`/api/integrations/${name}/oauth/start`);
+  return { url: res.data.authUrl };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -348,14 +422,16 @@ export async function updatePlatform(
   platform: string,
   payload: PlatformConnectPayload & { enabled?: boolean }
 ): Promise<void> {
-  await api.patch(`/api/platforms/${platform}`, payload);
+  // Backend stores platform config under PUT /api/settings → platforms.<name>
+  await api.put("/api/settings", {
+    platforms: { [platform]: payload },
+  });
 }
 
 export async function getWhatsAppQR(): Promise<{ qr: string | null; status: string }> {
-  const res = await api.get<{ qr: string | null; status: string }>(
-    "/api/platforms/whatsapp/qr"
-  );
-  return res.data;
+  // WhatsApp QR is delivered via WebSocket (type: "whatsapp_qr") — no REST endpoint exists.
+  // Return a no-op so the polling query doesn't 404.
+  return { qr: null, status: "unknown" };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -369,8 +445,8 @@ export async function getLogs(params?: {
   from?: string;
   to?: string;
 }): Promise<LogEntry[]> {
-  const res = await api.get<LogEntry[]>("/api/logs", { params });
-  return res.data;
+  const res = await api.get<{ data: LogEntry[] } | LogEntry[]>("/api/logs", { params });
+  return Array.isArray(res.data) ? res.data : (res.data as any).data ?? [];
 }
 
 export async function clearOldLogs(olderThanDays?: number): Promise<{ deleted: number }> {
@@ -389,10 +465,8 @@ export async function clearMemory(): Promise<void> {
 }
 
 export async function testPlatformConnection(
-  platform: string
+  _platform: string
 ): Promise<{ ok: boolean; message: string }> {
-  const res = await api.post<{ ok: boolean; message: string }>(
-    `/api/platforms/${platform}/test`
-  );
-  return res.data;
+  // No platform test endpoint exists in the backend yet.
+  return { ok: false, message: "Platform connection test not available." };
 }

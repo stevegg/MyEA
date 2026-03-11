@@ -128,7 +128,7 @@ env_set "ADMIN_USERNAME" "${ADMIN_USERNAME}"
 
 # Check if a valid password hash already exists
 CURRENT_HASH=$(env_get "ADMIN_PASSWORD_HASH")
-PLACEHOLDER='$2b$12$kljweoriuKJHdskjhiwuhyKJHkjuAGSHD3843'
+PLACEHOLDER='$2b$12$replacethiswithyourbcrypthash'
 if [ "${CURRENT_HASH}" = "${PLACEHOLDER}" ] || [ -z "${CURRENT_HASH}" ]; then
   while true; do
     read -rsp "Admin password (min 8 chars): " ADMIN_PASSWORD
@@ -146,15 +146,13 @@ if [ "${CURRENT_HASH}" = "${PLACEHOLDER}" ] || [ -z "${CURRENT_HASH}" ]; then
     break
   done
 
-  # Store the plain-text password in .env — the backend container hashes it
-  # with bcrypt (cost=12) on first boot via migrate.ts. The .env file is
-  # local-only and excluded from git via .gitignore.
   env_set "ADMIN_PASSWORD" "${ADMIN_PASSWORD}"
-  # Clear any stale hash placeholder
   env_set "ADMIN_PASSWORD_HASH" ""
-  info "Admin password stored — the container will hash it on first boot."
+  info "Admin password stored."
 else
   info "ADMIN_PASSWORD_HASH already configured — skipping password prompt."
+  # Still need ADMIN_PASSWORD for the post-start DB update
+  ADMIN_PASSWORD=""
 fi
 
 # ─────────────────────────────────────────────────────────────
@@ -265,6 +263,28 @@ header "Starting myEA"
 info "Starting all services..."
 ${COMPOSE_CMD} up -d
 
+# ── Helper: update admin password in DB via running container ──
+set_admin_password() {
+  local username="$1"
+  local password="$2"
+  if [ -z "${password}" ]; then
+    return 0
+  fi
+  info "Setting admin password in database..."
+  local hash
+  hash=$(docker exec -w /app myea-backend node -e \
+    "const b=require('bcryptjs');b.hash(process.argv[1],12).then(h=>{process.stdout.write(h)})" \
+    "${password}" 2>/dev/null)
+  if [ -z "${hash}" ]; then
+    warn "Could not hash password via container — try again after startup with:"
+    warn "  docker exec myea-backend node -e 'const b=require(\"bcryptjs\");b.hash(\"PASSWORD\",12).then(h=>process.stdout.write(h))'"
+    return 1
+  fi
+  docker exec myea-postgres psql -U "${POSTGRES_USER:-myea}" -d "${POSTGRES_DB:-myea}"     -c "INSERT INTO users (id,username,password_hash,is_admin,display_name,created_at,updated_at)
+        VALUES (gen_random_uuid(),'${username}','${hash}',true,'${username}',now(),now())
+        ON CONFLICT (username) DO UPDATE SET password_hash=EXCLUDED.password_hash,updated_at=now();"     -q 2>/dev/null && info "Admin password set for user '${username}'." || warn "DB update failed — check logs."
+}
+
 info "Waiting for services to become healthy..."
 WAIT_SECS=90
 ELAPSED=0
@@ -295,6 +315,15 @@ fi
 # ─────────────────────────────────────────────────────────────
 # 10. Done
 # ─────────────────────────────────────────────────────────────
+# Set/update admin password now that the stack is running
+ADMIN_PASSWORD_CURRENT=$(env_get "ADMIN_PASSWORD")
+if [ -n "${ADMIN_PASSWORD_CURRENT}" ]; then
+  set_admin_password "${ADMIN_USERNAME}" "${ADMIN_PASSWORD_CURRENT}"
+  # Clear plaintext from .env now that it's in the DB
+  env_set "ADMIN_PASSWORD" ""
+  info "Plain-text password cleared from .env."
+fi
+
 FRONTEND_PORT=$(env_get "FRONTEND_PORT")
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 BACKEND_PORT=$(env_get "BACKEND_PORT")
