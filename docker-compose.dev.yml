@@ -1,0 +1,77 @@
+version: "3.9"
+
+# ============================================================
+# myEA — Development Overrides
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# Or simply:
+#   make dev
+#
+# This file:
+#   - Mounts source code for hot-reload
+#   - Switches backend to ts-node-dev (no build step)
+#   - Switches frontend to the Vite dev server
+#   - Exposes postgres on the host for direct psql access
+#   - Disables resource limits (let the host manage them)
+# ============================================================
+
+services:
+  # ── PostgreSQL (expose for local tooling) ──────────────────
+  postgres:
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    deploy:
+      resources: {}
+
+  # ── Backend (hot-reload via tsx watch) ─────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    environment:
+      NODE_ENV: development
+    volumes:
+      # Mount source for hot-reload; node_modules stays inside the container
+      - ./backend/src:/app/src:delegated
+      - ./backend/drizzle:/app/drizzle:delegated
+      - ./backend/tsconfig.json:/app/tsconfig.json:ro
+      # Named volumes for runtime data (same as prod)
+      - skills_data:/app/volumes/skills
+      - files_data:/app/volumes/files
+      - logs_data:/app/volumes/logs
+      - whatsapp_session:/app/volumes/whatsapp
+    command: ["./entrypoint.sh"]
+    deploy:
+      resources: {}
+
+  # ── Frontend (Vite dev server with HMR) ────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    environment:
+      NODE_ENV: development
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
+      VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:3001}
+    volumes:
+      # Mount source; node_modules stays inside the container
+      - ./frontend/src:/app/src:delegated
+      - ./frontend/public:/app/public:delegated
+      - ./frontend/index.html:/app/index.html:ro
+      - ./frontend/vite.config.ts:/app/vite.config.ts:ro
+      - ./frontend/tsconfig.json:/app/tsconfig.json:ro
+    ports:
+      - "${FRONTEND_PORT:-3000}:5173"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5173 || exit 1"]
+    deploy:
+      resources: {}
+
+  # ── Ollama (no resource cap in dev) ────────────────────────
+  ollama:
+    ports:
+      - "11434:11434"
+    deploy:
+      resources: {}

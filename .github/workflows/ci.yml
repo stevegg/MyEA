@@ -1,0 +1,144 @@
+# =============================================================================
+# myEA — CI Pipeline
+# =============================================================================
+#
+# Runs on every push and pull request targeting `main`.
+#
+# Jobs
+# ────
+#   backend-check   — TypeScript type-check (tsc --noEmit)
+#   frontend-check  — TypeScript type-check + Vite production build
+#   docker-build    — Build both Docker images to verify they compile
+#                     (runs after backend-check AND frontend-check both pass)
+#
+# Jobs 1 and 2 run in parallel. Job 3 requires both to succeed.
+#
+# No secrets required for the first two jobs. The docker-build job uses
+# docker/build-push-action without pushing (load: false, push: false) so no
+# registry credentials are needed for basic CI validation.
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+# Cancel any in-progress run for the same branch/PR so resources aren't wasted
+# on stale commits.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Job 1: Backend TypeScript check ────────────────────────────────────────
+  backend-check:
+    name: Backend — TypeScript check
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript type check
+        run: npx tsc --noEmit
+
+  # ── Job 2: Frontend TypeScript check + Vite build ─────────────────────────
+  frontend-check:
+    name: Frontend — TypeScript check + Vite build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript type check
+        run: npx tsc --noEmit
+
+      - name: Vite production build
+        # Pass placeholder env vars so Vite's define substitution doesn't
+        # fail on missing VITE_* variables during CI.
+        env:
+          VITE_API_URL: "http://localhost:3001"
+          VITE_WS_URL: "ws://localhost:3001"
+        run: npx vite build
+
+  # ── Job 3: Docker image build verification ─────────────────────────────────
+  docker-build:
+    name: Docker — build images
+    runs-on: ubuntu-latest
+    # Both type-check jobs must pass before we attempt a full Docker build
+    needs:
+      - backend-check
+      - frontend-check
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Set up Docker Buildx for efficient layer caching
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ── Backend image ───────────────────────────────────────────────────────
+      - name: Build backend Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          # Target the production "runner" stage
+          target: runner
+          # Build but do not push — we only want to verify it compiles
+          push: false
+          # Use GitHub Actions cache to speed up repeated builds
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+          tags: myea-backend:ci
+
+      # ── Frontend image ──────────────────────────────────────────────────────
+      - name: Build frontend Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          target: runner
+          push: false
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+          # Pass build args that Vite reads at compile time inside the container
+          build-args: |
+            VITE_API_URL=http://localhost:3001
+            VITE_WS_URL=ws://localhost:3001
+          tags: myea-frontend:ci

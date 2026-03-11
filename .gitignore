@@ -1,0 +1,62 @@
+# ── Environment ──────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ── Node ─────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# ── TypeScript build output ───────────────────────────────────
+dist/
+build/
+*.js.map
+*.d.ts.map
+
+# ── Drizzle migrations output ────────────────────────────────
+backend/drizzle/
+
+# ── Frontend build ────────────────────────────────────────────
+frontend/dist/
+frontend/.vite/
+
+# ── Docker ───────────────────────────────────────────────────
+# Named volumes are managed by Docker; only bind-mount dirs tracked
+volumes/skills/*
+volumes/files/*
+volumes/logs/*
+!volumes/skills/.gitkeep
+!volumes/files/.gitkeep
+!volumes/logs/.gitkeep
+
+# ── WhatsApp Baileys session data ────────────────────────────
+baileys_auth_info/
+*.session
+
+# ── OS ───────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# ── IDE ──────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# ── Playwright ───────────────────────────────────────────────
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+# ── Misc ──────────────────────────────────────────────────────
+*.log
+coverage/
+.nyc_output/
