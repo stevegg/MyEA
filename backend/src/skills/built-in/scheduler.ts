@@ -50,11 +50,22 @@ function parseDateTime(datetime: string): Date | null {
 // Tool implementations
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function createReminder(params: unknown, _ctx: ExecutionContext): Promise<ToolResult> {
+async function createReminder(params: unknown, ctx: ExecutionContext): Promise<ToolResult> {
   const err = requireScheduler();
   if (err) return err;
 
-  const { message, datetime, platform } = params as { message: string; datetime: string; platform?: string };
+  const {
+    message,
+    datetime,
+    platform: explicitPlatform,
+    channelId: explicitChannelId,
+  } = params as { message: string; datetime: string; platform?: string; channelId?: string };
+
+  // Default delivery target to wherever the user is currently talking from.
+  // This ensures reminders come back on the same platform/channel (e.g. Slack DM).
+  const platform = explicitPlatform ?? ctx.triggerMessage?.platform ?? "internal";
+  const channelId = explicitChannelId ?? ctx.triggerMessage?.channelId ?? "default";
+  const userId = ctx.triggerMessage?.userId;
 
   const runAt = parseDateTime(datetime);
   if (!runAt) {
@@ -72,12 +83,12 @@ async function createReminder(params: unknown, _ctx: ExecutionContext): Promise<
     const jobId = await schedulerService!.scheduleOnce(
       "reminder:one-shot",
       runAt,
-      { message, platform: platform ?? "internal", createdAt: new Date().toISOString() }
+      { message, platform, channelId, userId, createdAt: new Date().toISOString() }
     );
     const formatted = DateTime.fromJSDate(runAt).toLocaleString(DateTime.DATETIME_FULL);
     return {
       content: `Reminder set for ${formatted}. Job ID: ${jobId}`,
-      data: { jobId, runAt: runAt.toISOString(), message },
+      data: { jobId, runAt: runAt.toISOString(), message, platform, channelId },
     };
   } catch (e) {
     const msg = getErrorMessage(e);
@@ -190,13 +201,12 @@ const schedulerSkill: Skill = {
 
     // Register the handler that fires when a one-shot reminder is due.
     await schedulerService.register("reminder:one-shot", async (job) => {
-      const payload = job.data as { message?: string; platform?: string };
-      context.logger.info({ jobId: job.id, message: payload.message }, "Reminder fired.");
-      // Find the user's preferred channel and deliver the reminder.
-      // We send an internal platform message and let the routing layer handle delivery.
+      const payload = job.data as { message?: string; platform?: string; channelId?: string; userId?: string };
+      context.logger.info({ jobId: job.id, message: payload.message, platform: payload.platform, channelId: payload.channelId }, "Reminder fired.");
       await context.sendMessage({
         platform: (payload.platform as "internal") ?? "internal",
-        channelId: "default",
+        channelId: payload.channelId ?? "default",
+        userId: payload.userId,
         text: `Reminder: ${payload.message ?? "(no message)"}`,
         proactive: true,
       });
@@ -204,11 +214,12 @@ const schedulerSkill: Skill = {
 
     // Register the handler for recurring tasks.
     await schedulerService.register("reminder:recurring", async (job) => {
-      const payload = job.data as { message?: string; platform?: string };
+      const payload = job.data as { message?: string; platform?: string; channelId?: string; userId?: string };
       context.logger.info({ jobId: job.id, message: payload.message }, "Recurring task fired.");
       await context.sendMessage({
         platform: (payload.platform as "internal") ?? "internal",
-        channelId: "default",
+        channelId: payload.channelId ?? "default",
+        userId: payload.userId,
         text: `Scheduled task: ${payload.message ?? "(no message)"}`,
         proactive: true,
       });
@@ -235,7 +246,11 @@ const schedulerSkill: Skill = {
           },
           platform: {
             type: "string",
-            description: "Target platform for delivery (telegram, discord, slack, internal). Defaults to internal.",
+            description: "Target platform for delivery (telegram, discord, slack, internal). Defaults to the platform the user is messaging from.",
+          },
+          channelId: {
+            type: "string",
+            description: "Channel or DM ID to deliver the reminder to. Defaults to the channel the user is messaging from.",
           },
         },
         required: ["message", "datetime"],

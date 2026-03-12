@@ -159,6 +159,9 @@ export class SchedulerServiceImpl implements SchedulerService {
     // Also register with pg-boss if it's not one of the built-in types
     const builtIns = new Set(Object.values(JOB_TYPE));
     if (!builtIns.has(jobName as JobType)) {
+      // pg-boss v10: the queue must exist before jobs can be sent to it.
+      // createQueue is idempotent (ON CONFLICT DO NOTHING).
+      await this.boss.createQueue(jobName);
       await this.boss.work<Record<string, unknown>>(jobName, async (jobs) => {
         const job = jobs[0];
         try {
@@ -213,6 +216,11 @@ export class SchedulerServiceImpl implements SchedulerService {
     runAt: Date,
     payload: Record<string, unknown> = {}
   ): Promise<string> {
+    // pg-boss v10: queue must exist before sendAfter() will insert a job.
+    // The insertJob SQL does a JOIN on the queue table — if the queue row is
+    // missing, the INSERT returns no rows and sendAfter() silently returns null.
+    await this.boss.createQueue(name);
+
     const pgBossId = await this.boss.sendAfter(name, payload, {}, runAt);
 
     this.logger.info({ name, runAt, pgBossId }, "Scheduled one-shot job");
