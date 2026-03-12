@@ -14,6 +14,7 @@
 
 import PgBoss from "pg-boss";
 import { eq, desc } from "drizzle-orm";
+import { randomUUID } from "crypto";
 import type {
   SchedulerService,
   ScheduledJob,
@@ -216,14 +217,21 @@ export class SchedulerServiceImpl implements SchedulerService {
 
     this.logger.info({ name, runAt, pgBossId }, "Scheduled one-shot job");
 
+    // The scheduled_jobs table has a unique index on `name`. Since multiple
+    // one-shot reminders share the same pg-boss queue name (e.g. "reminder:one-shot"),
+    // we give each DB row a unique name by appending the pg-boss job ID (or a
+    // random UUID as fallback). The original queue name is preserved in the payload
+    // so the cancel path can pass the right queue name to pg-boss.
+    const dbName = `${name}:${pgBossId ?? randomUUID()}`;
+
     const [row] = await this.db
       .insert(scheduledJobs)
       .values({
-        name,
+        name: dbName,
         description: `One-time job: ${name}`,
         schedule: runAt.toISOString(),
         recurring: false,
-        payload,
+        payload: { ...payload, _pgBossQueueName: name },
         enabled: true,
         pgBossJobId: pgBossId ?? undefined,
         nextRunAt: runAt,
@@ -249,7 +257,13 @@ export class SchedulerServiceImpl implements SchedulerService {
 
     if (row.pgBossJobId) {
       try {
-        await this.boss.cancel(row.name, row.pgBossJobId!);
+        // For one-shot jobs the DB row name has a UUID suffix (e.g. "reminder:one-shot:UUID").
+        // The pg-boss queue name is stored in the payload under _pgBossQueueName, or we
+        // strip the suffix as a fallback so boss.cancel() receives the right queue name.
+        const payload = (row.payload as Record<string, unknown>) ?? {};
+        const pgBossQueueName =
+          (payload["_pgBossQueueName"] as string | undefined) ?? row.name.replace(/:[0-9a-f-]{36}$/, "");
+        await this.boss.cancel(pgBossQueueName, row.pgBossJobId!);
       } catch (err) {
         this.logger.warn({ err, pgBossJobId: row.pgBossJobId }, "Could not cancel pg-boss job (may already be done)");
       }
@@ -275,6 +289,7 @@ export class SchedulerServiceImpl implements SchedulerService {
     const rows = await this.db
       .select()
       .from(scheduledJobs)
+      .where(eq(scheduledJobs.enabled, true))
       .orderBy(desc(scheduledJobs.createdAt));
 
     return rows.map(rowToScheduledJob);
@@ -284,10 +299,30 @@ export class SchedulerServiceImpl implements SchedulerService {
 
   private async _recordLastRun(pgBossJobId: string, name: string): Promise<void> {
     try {
-      await this.db
-        .update(scheduledJobs)
-        .set({ lastRunAt: new Date(), updatedAt: new Date() })
-        .where(eq(scheduledJobs.name, name));
+      if (pgBossJobId) {
+        // One-shot jobs: update by pgBossJobId (DB row name has a UUID suffix).
+        // Mark as disabled so the job disappears from the active list after firing.
+        const [row] = await this.db
+          .select({ recurring: scheduledJobs.recurring })
+          .from(scheduledJobs)
+          .where(eq(scheduledJobs.pgBossJobId, pgBossJobId))
+          .limit(1);
+        await this.db
+          .update(scheduledJobs)
+          .set({
+            lastRunAt: new Date(),
+            updatedAt: new Date(),
+            // One-shot jobs are consumed on firing; disable so they leave the active list.
+            ...(row && !row.recurring ? { enabled: false } : {}),
+          })
+          .where(eq(scheduledJobs.pgBossJobId, pgBossJobId));
+      } else {
+        // Cron jobs (no specific pgBossJobId): update by queue name.
+        await this.db
+          .update(scheduledJobs)
+          .set({ lastRunAt: new Date(), updatedAt: new Date() })
+          .where(eq(scheduledJobs.name, name));
+      }
     } catch {
       // Best-effort — do not throw from a job handler
     }
