@@ -89,6 +89,11 @@ function loadConfig(): AppConfig {
         phoneNumber: optional("SIGNAL_PHONE_NUMBER") || undefined,
         cliUrl: optional("SIGNAL_CLI_URL", "http://signal-cli:8080"),
       },
+      imessage: {
+        enabled: optionalBool("IMESSAGE_ENABLED"),
+        bridgeUrl: optional("IMESSAGE_BRIDGE_URL", "http://host.docker.internal:1234"),
+        password: optional("IMESSAGE_PASSWORD"),
+      },
     },
 
     integrations: {

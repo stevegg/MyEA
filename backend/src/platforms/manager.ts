@@ -24,6 +24,7 @@ import { DiscordConnector } from "./discord";
 import { SlackConnector } from "./slack";
 import { WhatsAppConnector } from "./whatsapp";
 import { SignalConnector } from "./signal";
+import { IMessageConnector } from "./imessage";
 import type { BasePlatformConnector } from "./base";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -209,6 +210,14 @@ export class PlatformManager {
       this._register(c);
     } else {
       this._initStatus("signal", false);
+    }
+
+    // iMessage (via BlueBubbles)
+    if (this.config.platforms.imessage.enabled) {
+      const c = new IMessageConnector(opts);
+      this._register(c);
+    } else {
+      this._initStatus("imessage", false);
     }
   }
 

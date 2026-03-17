@@ -41,6 +41,7 @@ export type Platform =
   | "slack"
   | "whatsapp"
   | "signal"
+  | "imessage"
   | "web"      // admin UI web chat
   | "internal"; // used for proactive/scheduled messages
 
@@ -499,6 +500,7 @@ export interface AppConfig {
     slack: { enabled: boolean; botToken?: string; appToken?: string; signingSecret?: string };
     whatsapp: { enabled: boolean };
     signal: { enabled: boolean; phoneNumber?: string; cliUrl: string };
+    imessage: { enabled: boolean; bridgeUrl: string; password: string };
   };
 
   integrations: {

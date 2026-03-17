@@ -14,12 +14,15 @@ import { DateTime } from "luxon";
 
 import type { Skill, SkillContext, ExecutionContext, ToolResult, SchedulerService } from "../../types";
 import { getErrorMessage, BUILT_IN_SKILL_VERSION } from "../../utils";
+import { getUserTimezone } from "../../api/settings";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module-level state
 // ─────────────────────────────────────────────────────────────────────────────
 
 let schedulerService: SchedulerService | null = null;
+/** Cached IANA timezone from user settings — loaded in setup(), used by parseDateTime. */
+let userTimezone = "UTC";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -33,14 +36,26 @@ function requireScheduler(): ToolResult | null {
 }
 
 function parseDateTime(datetime: string): Date | null {
-  // Try ISO first, then natural formats via Luxon.
+  // If the string has an explicit timezone offset, honour it exactly.
+  // Otherwise fall back to the user's configured timezone so that naive
+  // strings like "2026-03-12T16:18:00" mean 4:18 PM *local* time, not UTC.
   const iso = DateTime.fromISO(datetime, { setZone: true });
-  if (iso.isValid) return iso.toJSDate();
+  if (iso.isValid) {
+    // Luxon returns isOffsetFixed=true when an offset was present in the string.
+    // If no offset was present it uses the local system zone (UTC in Docker).
+    // Re-interpret in user timezone when no explicit offset was given.
+    if (iso.isOffsetFixed && datetime.match(/[+\-Z]\d{2}:\d{2}$|Z$/)) {
+      return iso.toJSDate();
+    }
+    // Naive string — reparse in user timezone.
+    const withTz = DateTime.fromISO(datetime, { zone: userTimezone });
+    if (withTz.isValid) return withTz.toJSDate();
+  }
 
   const http = DateTime.fromHTTP(datetime);
   if (http.isValid) return http.toJSDate();
 
-  const sql = DateTime.fromSQL(datetime);
+  const sql = DateTime.fromSQL(datetime, { zone: userTimezone });
   if (sql.isValid) return sql.toJSDate();
 
   return null;
@@ -85,7 +100,7 @@ async function createReminder(params: unknown, ctx: ExecutionContext): Promise<T
       runAt,
       { message, platform, channelId, userId, createdAt: new Date().toISOString() }
     );
-    const formatted = DateTime.fromJSDate(runAt).toLocaleString(DateTime.DATETIME_FULL);
+    const formatted = DateTime.fromJSDate(runAt).setZone(userTimezone).toLocaleString(DateTime.DATETIME_FULL);
     return {
       content: `Reminder set for ${formatted}. Job ID: ${jobId}`,
       data: { jobId, runAt: runAt.toISOString(), message, platform, channelId },
@@ -132,7 +147,7 @@ async function listReminders(_params: unknown, _ctx: ExecutionContext): Promise<
 
     const lines = reminders.map((j) => {
       const payload = j.payload as { message?: string };
-      const next = j.nextRunAt ? DateTime.fromISO(j.nextRunAt).toLocaleString(DateTime.DATETIME_FULL) : "unknown";
+      const next = j.nextRunAt ? DateTime.fromISO(j.nextRunAt).setZone(userTimezone).toLocaleString(DateTime.DATETIME_FULL) : "unknown";
       return `[${j.id}] ${j.recurring ? "RECURRING" : "ONE-TIME"} | Next: ${next}\n  Message: ${payload.message ?? "(no message)"}\n  Schedule: ${j.schedule}`;
     });
 
@@ -198,6 +213,11 @@ const schedulerSkill: Skill = {
 
   async setup(context: SkillContext): Promise<void> {
     schedulerService = context.scheduler;
+
+    // Cache the user's timezone so parseDateTime can interpret naive datetime
+    // strings (no offset) in local time rather than UTC.
+    userTimezone = await getUserTimezone(context.db).catch(() => "UTC");
+    context.logger.debug({ userTimezone }, "Scheduler skill: loaded user timezone.");
 
     // Register the handler that fires when a one-shot reminder is due.
     await schedulerService.register("reminder:one-shot", async (job) => {

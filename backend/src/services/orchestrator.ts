@@ -17,6 +17,7 @@
  */
 
 import { eq, asc, desc, and, sql } from "drizzle-orm";
+import { getUserTimezone } from "../api/settings";
 import type {
   PlatformMessage,
   OutboundMessage,
@@ -56,13 +57,34 @@ const MEMORY_RESULTS = 8; // relevant memories to inject
 function buildSystemPrompt(
   config: AppConfig,
   memoryContext: string,
-  platform: string
+  platform: string,
+  timezone: string = "UTC"
 ): string {
-  const now = new Date().toISOString();
+  // Format current time in the user's configured timezone so the AI uses the
+  // correct local offset when creating reminders or reasoning about time.
+  const nowUtc = new Date();
+  const localFormatted = nowUtc.toLocaleString("en-US", {
+    timeZone: timezone,
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZoneName: "longOffset", // e.g. "GMT-06:00"
+  });
+  // Compute the numeric UTC offset so the AI can construct ISO strings correctly.
+  const tzOffset = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    timeZoneName: "longOffset",
+  })
+    .formatToParts(nowUtc)
+    .find((p) => p.type === "timeZoneName")?.value ?? "UTC";
 
   return `You are myEA, a personal AI executive assistant. You are highly capable, proactive, and concise. You help your user manage their life: schedule, communications, information, tasks, and smart-home control.
 
-Current time: ${now}
+Current time: ${localFormatted} (${tzOffset})
+User timezone: ${timezone}
 Active platform: ${platform}
 AI model: ${config.ai.model} (${config.ai.activeProvider})
 
@@ -239,7 +261,12 @@ export class Orchestrator {
       inbound,
       aiMessages,
       tools,
-      systemPrompt: buildSystemPrompt(config, memoryContext, inbound.platform),
+      systemPrompt: buildSystemPrompt(
+        config,
+        memoryContext,
+        inbound.platform,
+        await getUserTimezone(db),
+      ),
     });
 
     // 8. Persist all new assistant/tool messages in a single batch insert

@@ -212,7 +212,14 @@ const jobsPlugin: FastifyPluginAsync<JobsPluginOptions> = async (
           if (isNaN(runAt.getTime())) {
             return reply.status(400).send({ error: "Invalid schedule datetime" });
           }
-          newJobId = await scheduler.scheduleOnce(existing.name, runAt, newPayload);
+          // For one-shot jobs, existing.name has a UUID suffix (e.g. "reminder:one-shot:UUID").
+          // The actual pg-boss queue name is stored in the payload under _pgBossQueueName.
+          // Fall back to stripping the UUID suffix if that field is absent.
+          const existingPayloadObj = (existing.payload as Record<string, unknown>) ?? {};
+          const pgBossQueueName =
+            (existingPayloadObj._pgBossQueueName as string | undefined) ??
+            existing.name.replace(/:[0-9a-f-]{36}$/, "");
+          newJobId = await scheduler.scheduleOnce(pgBossQueueName, runAt, newPayload);
         }
 
         // The new row was inserted; delete the old one

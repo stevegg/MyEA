@@ -49,6 +49,7 @@ export interface PublicSettings {
     slack: { enabled: boolean; configured: boolean };
     whatsapp: { enabled: boolean; configured: boolean };
     signal: { enabled: boolean; configured: boolean };
+    imessage: { enabled: boolean; configured: boolean; bridgeUrl: string };
   };
   assistant: {
     timezone: string;
@@ -71,6 +72,7 @@ interface PersistedSettings {
     slack?: { enabled?: boolean };
     whatsapp?: { enabled?: boolean };
     signal?: { enabled?: boolean };
+    imessage?: { enabled?: boolean };
   };
   assistant?: {
     timezone?: string;
@@ -148,6 +150,7 @@ const settingsPlugin: FastifyPluginAsync<SettingsPluginOptions> = async (
                 slack: { type: "object", properties: { enabled: { type: "boolean" } } },
                 whatsapp: { type: "object", properties: { enabled: { type: "boolean" } } },
                 signal: { type: "object", properties: { enabled: { type: "boolean" } } },
+                imessage: { type: "object", properties: { enabled: { type: "boolean" } } },
               },
             },
             assistant: {
@@ -418,6 +421,11 @@ function mergeWithDefaults(persisted: PersistedSettings, config: AppConfig): Pub
         enabled: persisted.platforms?.signal?.enabled ?? config.platforms.signal.enabled,
         configured: Boolean(config.platforms.signal.phoneNumber),
       },
+      imessage: {
+        enabled: persisted.platforms?.imessage?.enabled ?? config.platforms.imessage.enabled,
+        configured: Boolean(config.platforms.imessage.password),
+        bridgeUrl: config.platforms.imessage.bridgeUrl,
+      },
     },
     assistant: {
       timezone: persisted.assistant?.timezone ?? "UTC",
@@ -461,3 +469,17 @@ export default fp(settingsPlugin, {
   name: "settings-routes",
   dependencies: ["auth"],
 });
+
+/**
+ * Exported helper — returns the user's configured IANA timezone string,
+ * falling back to "UTC" if not set. Used by the orchestrator to format
+ * the current time in the system prompt so the AI uses the correct offset.
+ *
+ * Accepts either a raw DrizzleDB instance or a DatabaseService (whose `.db`
+ * property is the underlying Drizzle instance).
+ */
+export async function getUserTimezone(db: DrizzleDB | { db: unknown }): Promise<string> {
+  const drizzle: DrizzleDB = "select" in db ? db as DrizzleDB : (db as { db: DrizzleDB }).db;
+  const persisted = await loadPersistedSettings(drizzle);
+  return persisted.assistant?.timezone ?? "UTC";
+}
